@@ -35,7 +35,7 @@ Gthulhu ensures coordinated scheduling across a multi-node cluster through three
 | [**Gthulhu/api**](https://github.com/Gthulhu/api) | **Interface**: Communication protocols and policy definitions. | Go (REST) |
 | [**Gthulhu/plugin**](https://github.com/Gthulhu/plugin) | **Strategies**: Pre-built user-space scheduling plugins. | Go |
 | [**Gthulhu/chart**](https://github.com/Gthulhu/chart) | **Deployment**: Helm charts for K8s integration. | Helm |
-| [**Gthulhu/mcp**](https://github.com/Gthulhu/mcp) | **Future**: AI-driven scheduling via MCP protocol. | TypeScript |
+| [**Gthulhu/mcp**](https://github.com/Gthulhu/mcp) | **Future**: AI-driven scheduling via MCP protocol (Note: mcp is currently archived, the gthulhu will embed AI-powered assistant in R2). | TypeScript |
 
 ---
 
