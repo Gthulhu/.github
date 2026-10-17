@@ -1,18 +1,61 @@
 # 🐙 Gthulhu
 
-**From Kubernetes resource allocation to Linux task scheduling.**
+**Kubernetes places the workload. Gthulhu controls how it gets CPU time.**
 
 [![CNCF Landscape](https://img.shields.io/badge/CNCF-Landscape-blue?style=for-the-badge&logo=cncf)](https://landscape.cncf.io/)
 [![eBPF Application](https://img.shields.io/badge/eBPF-Application-orange?style=for-the-badge&logo=ebpf)](https://ebpf.io/applications/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-green.svg?style=for-the-badge)](https://opensource.org/licenses/Apache-2.0)
 
-Gthulhu is a cloud-native runtime scheduling project built around Kubernetes, eBPF, and Linux `sched_ext`.
+Gthulhu is a cloud-native **runtime scheduling** project built around Kubernetes, eBPF, and Linux `sched_ext`.
 
-Our current direction is **Claim2Core**:
+Kubernetes is good at deciding **where** a workload should run and **what resources** it should receive. Gthulhu focuses on what happens next: mapping that workload intent to the Linux tasks that actually need CPU service, applying node-local scheduling policy, and observing whether runtime behavior matches the intent.
 
-> **DRA chooses what and where; Gthulhu controls how it actually runs.**
+> **Kubernetes decides where. Gthulhu controls how CPU time is delivered.**
 
-Kubernetes can allocate a workload to a Node, GPU, NIC, CPU set, NUMA domain, or other device. Gthulhu focuses on the execution gap that follows: mapping workload intent and actual allocation to the Linux tasks that need CPU service, then applying bounded runtime policy through `sched_ext` and verifying the result with eBPF telemetry.
+[**Get started →**](https://gthulhu.org/k8s/) · [**How it works →**](https://gthulhu.org/how-it-works/) · [**Claim2Core roadmap →**](https://gthulhu.org/claim2core/)
+
+## From workload intent to CPU dispatch
+
+![Gthulhu workflow from workload intent to per-node sched_ext CPU dispatch](assets/gthulhu-workflow.gif)
+
+Read the flow in four steps:
+
+1. **Express intent** — a user or controller creates a scheduling strategy through the Web/API and Kubernetes CRDs.
+2. **Resolve the workload** — the Manager watches Kubernetes state and turns the strategy into policy for the nodes actually running the workload.
+3. **Decide per node** — every node has its own Decision Maker and Gthulhu Scheduler, so policy is resolved against node-local workload/task state.
+4. **Apply at CPU dispatch** — the node-local scheduler programs eBPF `sched_ext`, which controls dispatch queues and CPU placement.
+
+The result is a clean split of responsibility: Kubernetes keeps ownership of **placement and resource allocation**; Gthulhu handles **runtime CPU scheduling for the selected tasks**.
+
+## Why Gthulhu exists
+
+A Pod can be on the right Node and still miss its SLO. Under CPU contention, an `EngineCore`, feeder thread, packet-processing worker, IRQ-related task, or other critical thread may wait behind background work even though Kubernetes already allocated the workload's resources.
+
+Gthulhu closes that execution gap with three capabilities:
+
+- **Observe** — use eBPF to see task waiting, execution, migration, and CPU contention.
+- **Target** — resolve Kubernetes workload context to the process or thread that actually matters.
+- **Control** — use Linux `sched_ext` to apply bounded scheduling policy without maintaining a kernel fork.
+
+## Evidence, not blanket performance claims
+
+- **free5GC / 5G user plane:** in a published CPU-stress case study, average UE ping latency fell from **88.98 ms to 2.079 ms**, with maximum latency falling from **130.95 ms to 8.45 ms**. [Read the case study →](https://free5gc.org/blog/20251126/20251126/)
+- **vLLM / host-side scheduling:** our experiments show that CPU contention can become part of the inference critical path in some setups, while other workloads remain GPU- or network-bound. [Read the benchmark analysis →](https://gthulhu.org/vllm-cpu-pressure/)
+
+Gthulhu is most useful when **CPU scheduling is actually part of the workload bottleneck**. The project aims to make that measurable instead of assuming every workload needs a custom scheduler.
+
+## What exists today
+
+- pod-level scheduling observability with eBPF;
+- Prometheus / Grafana / KEDA integration;
+- distributed scheduling intent through a Manager and per-node Decision Makers;
+- custom CPU scheduling on Linux 6.12+ with `sched_ext`;
+- TID-aware node-policy matching for non-leader worker threads;
+- user-space and kernel-mode priority handling with explicit non-boosting semantics.
+
+## Claim2Core: connect allocation to execution
+
+Our current direction is **Claim2Core**: carry Kubernetes' actual resource allocation all the way to runtime task scheduling.
 
 ```text
 Kueue / Workload API
@@ -30,46 +73,29 @@ sched_ext + eBPF
 Delivered workload SLO
 ```
 
-## What exists today
+The principle is simple: observe `ResourceClaim` allocation, preserve the CPU/resource boundaries Kubernetes established, map that allocation to the right Linux tasks, then apply and verify runtime policy.
 
-- pod-level scheduling observability with eBPF;
-- Prometheus / Grafana / KEDA integration;
-- distributed scheduling intents through a Manager and per-node Decision Makers;
-- custom CPU scheduling on Linux 6.12+ with `sched_ext`;
-- TID-aware node-policy matching for non-leader worker threads;
-- user-space and kernel-mode priority handling with explicit non-boosting semantics.
-
-The next roadmap steps focus on DRA semantic correctness, read-only `ResourceClaim` observation, Claim-to-Task provenance, and a static DRA-aware execution policy. See [Gthulhu 2026 Roadmap — Claim2Core](https://github.com/Gthulhu/Gthulhu/issues/141).
+See [Gthulhu 2026 Roadmap — Claim2Core](https://github.com/Gthulhu/Gthulhu/issues/141).
 
 ## Repository map
 
-| Repository | Status | Role |
-|---|---|---|
-| [**Gthulhu/Gthulhu**](https://github.com/Gthulhu/Gthulhu) | Active | Main runtime/control-plane implementation |
-| [**Gthulhu/qumun**](https://github.com/Gthulhu/qumun) | Active | Go framework for custom `sched_ext` schedulers |
-| [**Gthulhu/plugin**](https://github.com/Gthulhu/plugin) | Active | User-space scheduling strategy implementation |
-| [**Gthulhu/docs**](https://github.com/Gthulhu/docs) | Active | Official documentation at [gthulhu.org](https://gthulhu.org) |
-| [**Gthulhu/gtp5g-operator**](https://github.com/Gthulhu/gtp5g-operator) | Active | Telecom / GTP5G integration work |
-| [**Gthulhu/kina**](https://github.com/Gthulhu/kina) | Active | Related runtime experimentation |
-| [**Gthulhu/libbpfgo**](https://github.com/Gthulhu/libbpfgo) | Active | Project-maintained libbpfgo fork |
-| [**Gthulhu/api**](https://github.com/Gthulhu/api) | Archived | Historical standalone API repository; code has moved into the main repository |
-| [**Gthulhu/chart**](https://github.com/Gthulhu/chart) | Archived | Historical standalone Helm chart repository; deployment assets now live with the main project |
-| [**Gthulhu/mcp**](https://github.com/Gthulhu/mcp) | Archived | Experimental MCP work |
+| Repository | Role |
+|---|---|
+| [**Gthulhu/Gthulhu**](https://github.com/Gthulhu/Gthulhu) | Main runtime/control-plane implementation |
+| [**Gthulhu/qumun**](https://github.com/Gthulhu/qumun) | Go framework for custom `sched_ext` schedulers |
+| [**Gthulhu/plugin**](https://github.com/Gthulhu/plugin) | User-space scheduling strategies |
+| [**Gthulhu/docs**](https://github.com/Gthulhu/docs) | Official documentation at [gthulhu.org](https://gthulhu.org) |
+| [**Gthulhu/gtp5g-operator**](https://github.com/Gthulhu/gtp5g-operator) | Telecom / GTP5G integration work |
+| [**Gthulhu/libbpfgo**](https://github.com/Gthulhu/libbpfgo) | Project-maintained libbpfgo fork |
 
-## Current research / engineering themes
-
-- **Claim2Core** — `ResourceClaim → Pod/cgroup → TGID/TID → sched_ext` execution lineage.
-- **Device-local execution domains** — respect allocated CPU/cgroup boundaries while preferring NUMA / PCIe locality.
-- **Scheduling provenance** — preview, explain, intended-vs-actual runtime state, and stale-state verification.
-- **Workload adapters** — free5GC/UPF first for fast end-to-end validation; LLM prefill/decode/NCCL roles for accelerator-focused research.
-- **Closed-loop runtime control** — only after static policy and provenance are trustworthy.
+Archived experimental or historical repositories remain available under the organization for reference.
 
 ## Join the project
 
 - **Main repository:** [Gthulhu/Gthulhu](https://github.com/Gthulhu/Gthulhu)
-- **Roadmap:** [Issue #141](https://github.com/Gthulhu/Gthulhu/issues/141)
 - **Documentation:** [gthulhu.org](https://gthulhu.org)
+- **Roadmap:** [Issue #141](https://github.com/Gthulhu/Gthulhu/issues/141)
 - **Contributing:** [Contribution guide](https://gthulhu.org/contributing/)
 - **Discussions:** [GitHub Discussions](https://github.com/Gthulhu/Gthulhu/discussions)
 
-Gthulhu is Apache-2.0 licensed and welcomes contributions across Kubernetes, DRA, eBPF, `sched_ext`, NUMA/topology, observability, telecom, and accelerator workloads.
+Gthulhu is Apache-2.0 licensed. Contributions across Kubernetes, DRA, eBPF, `sched_ext`, NUMA/topology, observability, telecom, and accelerator workloads are welcome.
